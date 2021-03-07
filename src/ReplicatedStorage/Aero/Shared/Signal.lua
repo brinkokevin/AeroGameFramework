@@ -1,79 +1,29 @@
--- Signal
--- Stephen Leitnick
--- Based off of Anaminus' Signal class: https://gist.github.com/Anaminus/afd813efc819bad8e560caea28942010
+-- https://github.com/Validark/Roblox-TS-Libraries/blob/master/signal/init.lua
 
 --[[
-
-	signal = Signal.new()
-
+	signal = Signal.new([maid])
 	signal:Fire(...)
 	signal:Wait()
 	signal:WaitPromise()
 	signal:Destroy()
 	signal:DisconnectAll()
-	
-	connection = signal:Connect(functionHandler)
-
-	connection.Connected
-	connection:Disconnect()
-	connection:IsConnected()
-
 --]]
 
-local Promise
-
-local Connection = {}
-Connection.__index = Connection
-
-function Connection.new(signal, connection)
-	local self = setmetatable({
-		_signal = signal;
-		_conn = connection;
-		Connected = true;
-	}, Connection)
-	return self
-end
-
-function Connection:Disconnect()
-	if (self._conn) then
-		self._conn:Disconnect()
-		self._conn = nil
-	end
-	if (not self._signal) then return end
-	self.Connected = false
-	local connections = self._signal._connections
-	local connectionIndex = table.find(connections, self)
-	if (connectionIndex) then
-		local n = #connections
-		connections[connectionIndex] = connections[n]
-		connections[n] = nil
-	end
-	self._signal = nil
-end
-
-function Connection:IsConnected()
-	if (self._conn) then
-		return self._conn.Connected
-	end
-	return false
-end
-
-Connection.Destroy = Connection.Disconnect
-
---------------------------------------------
+local Promise = require(script.Parent.Promise)
 
 local Signal = {}
 Signal.__index = Signal
 
 
-function Signal.new()
+function Signal.new(maid)
 	local self = setmetatable({
 		_bindable = Instance.new("BindableEvent");
-		_connections = {};
-		_args = {};
-		_threads = 0;
-		_id = 0;
 	}, Signal)
+
+	if maid then
+		maid:GiveTask(self)
+	end
+
 	return self
 end
 
@@ -83,24 +33,25 @@ function Signal.Is(obj)
 end
 
 
+function Signal:Connect(callback)
+	return self._bindable.Event:Connect(function(getArguments)
+		callback(getArguments())
+	end)
+end
+
+
 function Signal:Fire(...)
-	local id = self._id
-	self._id = self._id + 1
-	self._args[id] = {#self._connections + self._threads, {n = select("#", ...), ...}}
-	self._threads = 0
-	self._bindable:Fire(id)
+	local Arguments = { ... }
+	local n = select("#", ...)
+
+	self._bindable:Fire(function()
+		return table.unpack(Arguments, 1, n)
+	end)
 end
 
 
 function Signal:Wait()
-	self._threads = self._threads + 1
-	local id = self._bindable.Event:Wait()
-	local args = self._args[id]
-	args[1] = args[1] - 1
-	if (args[1] <= 0) then
-		self._args[id] = nil
-	end
-	return table.unpack(args[2], 1, args[2].n)
+	return self._bindable.Event:Wait()()
 end
 
 
@@ -111,39 +62,14 @@ function Signal:WaitPromise()
 end
 
 
-function Signal:Connect(handler)
-	local connection = Connection.new(self, self._bindable.Event:Connect(function(id)
-		local args = self._args[id]
-		args[1] = args[1] - 1
-		if (args[1] <= 0) then
-			self._args[id] = nil
-		end
-		handler(table.unpack(args[2], 1, args[2].n))
-	end))
-	table.insert(self._connections, connection)
-	return connection
-end
-
-
 function Signal:DisconnectAll()
-	for _,c in ipairs(self._connections) do
-		if (c._conn) then
-			c._conn:Disconnect()
-		end
-	end
-	self._connections = {}
-	self._args = {}
+	self._bindable:Destroy()
+	self._bindable = Instance.new("BindableEvent")
 end
 
 
 function Signal:Destroy()
-	self:DisconnectAll()
 	self._bindable:Destroy()
-end
-
-
-function Signal:Init()
-	Promise = self.Shared.Promise
 end
 
 
